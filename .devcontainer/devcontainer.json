@@ -1,13 +1,12 @@
 {
   "name": "cloud-foundations-lab",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11-bullseye",
 
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-    "ghcr.io/devcontainers/features/python:1": { "version": "3.11" }
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
 
-  "postCreateCommand": "pip install -r requirements.txt && cp .env.example .env",
+  "postCreateCommand": "python3 -m pip install -r requirements.txt && cp .env.example .env",
 
   "forwardPorts": [5432, 9000, 9001, 6379, 9092, 4566],
   "portsAttributes": {
@@ -29,7 +28,6 @@
         "mtxr.sqltools-driver-pg"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python3",
         "terminal.integrated.defaultProfile.linux": "bash"
       }
     }
