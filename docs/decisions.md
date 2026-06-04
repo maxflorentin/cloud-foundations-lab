@@ -61,3 +61,16 @@ Tradeoff: depende de conectividad y de los free-tier hours disponibles (60 hs/me
 Con Docker local se trabaja offline y sin límite de tiempo.
 
 Resultado: Codespaces para las clases, Docker local como fallback documentado en el README.
+### 005 - DuckDB sobre archivo JSON vs carga en PostgreSQL
+
+Decision: Consultar el archivo de eventos directamente con DuckDB en lugar de cargarlo en PostgreSQL.
+
+Contexto: Una vez procesados los eventos de GitHub, necesitamos analizarlos para ver qué repositorios tuvieron más actividad. Los datos ya están guardados en un archivo JSON en nuestra computadora.
+
+Alternativas:
+- Levantar PostgreSQL, crear una tabla, cargar el archivo y recién ahí consultarlo.
+- Usar DuckDB que lee el archivo directo, como si fuera una planilla de Excel, sin pasos previos.
+
+Tradeoff: PostgreSQL es más potente y escala mejor para grandes volúmenes, pero requiere más pasos y tener el servicio corriendo. DuckDB es más simple y rápido para explorar datos, pero no es ideal si los datos crecen mucho.
+
+Resultado: Para explorar archivos de datos de forma rápida y sin infraestructura, DuckDB es la mejor opción. En AWS esto sería equivalente a usar Athena para consultar archivos guardados en S3, sin necesidad de cargar nada en una base de datos.
