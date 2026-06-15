@@ -15,7 +15,7 @@ def run_sql(cur, path):
 
 
 def load_csv(cur, table, path, transform=None):
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
     if transform:
         rows = [transform(r) for r in rows]
