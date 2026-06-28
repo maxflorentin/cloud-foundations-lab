@@ -22,17 +22,22 @@ Las tres comparten el mismo secret (Secrets Manager) y el mismo security group (
 
 - Branch `lab-08-tuNombre` desde main
 - Labs previos corridos en orden:
-  - Lab 04: `python scripts/iam_demo.py` (necesario para `app-role`, `app-instance-profile`)
+  - Lab 02: `python scripts/ec2_demo.py` (necesario para `app-instance-profile`) 
+  - Lab 04: `python scripts/iam_demo.py` (necesario para `app-role`)
   - Lab 07: `python scripts/vpc_demo.py` (necesario para `course-vpc`, `app-private-sg`)
 - Servicios: `docker compose up -d` (incluye `localstack` y `postgres`)
 - `awslocal --version` responde · `psql --version` responde
 
+> **Si `psql` no responde** (Codespaces creados antes de este lab no lo tienen):
+> ```bash
+> sudo apt-get update && sudo apt-get install -y postgresql-client
+> ```
+> Para Codespaces nuevos ya está en `postCreateCommand` del devcontainer.
+
 ```bash
 # Verificar
-awslocal ec2 describe-vpcs --filters Name=tag:Name,Values=course-vpc \
-  --query "Vpcs[0].VpcId" --output text
-awslocal iam get-instance-profile --instance-profile-name app-instance-profile \
-  --query "InstanceProfile.Arn"
+awslocal ec2 describe-vpcs --filters Name=tag:Name,Values=course-vpc --query "Vpcs[0].VpcId" --output text
+awslocal iam get-instance-profile --instance-profile-name app-instance-profile --query "InstanceProfile.Arn"
 docker compose ps postgres
 ```
 
