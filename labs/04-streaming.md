@@ -16,7 +16,7 @@ Objetivo: entender la diferencia entre cola (queue) y stream, producir y consumi
 ## Prerrequisitos
 
 - `docker compose up -d redpanda`
-- `pip install kafka-python` (o ya en `requirements.txt`)
+- `pip install kafka-python-ng` (o ya en `requirements.txt`)
 
 ## Paso 1 — Levantar Redpanda
 

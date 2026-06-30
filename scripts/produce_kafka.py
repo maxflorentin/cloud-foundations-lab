@@ -6,7 +6,7 @@ Equivalente AWS: Kinesis PutRecord / MSK producer.
 
 AWS real:
   - Para Kinesis: usar boto3 kinesis.put_record()
-  - Para MSK: mismo código kafka-python con bootstrap_servers de MSK
+  - Para MSK: mismo código kafka-python-ng con bootstrap_servers de MSK
   - Misma semántica de offset y particiones
 """
 
@@ -25,7 +25,7 @@ try:
     from kafka import KafkaProducer
     from kafka.errors import NoBrokersAvailable
 except ImportError:
-    print("Instalar kafka-python: pip install kafka-python")
+    print("Instalar kafka-python-ng: pip install kafka-python-ng")
     sys.exit(1)
 
 

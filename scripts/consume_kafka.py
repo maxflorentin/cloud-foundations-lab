@@ -22,7 +22,7 @@ try:
     from kafka import KafkaConsumer
     from kafka.errors import NoBrokersAvailable
 except ImportError:
-    print("Instalar kafka-python: pip install kafka-python")
+    print("Instalar kafka-python-ng: pip install kafka-python-ng")
     sys.exit(1)
 
 
