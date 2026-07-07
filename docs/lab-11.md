@@ -60,14 +60,14 @@ awslocal cloudwatch describe-alarms --alarm-names cpu-alta-web-tier
 
 ## Parte 2 — Criticar una alarma mal diseñada
 
-Abrí `monitoring/alarm-mal-disenada.json`. Tiene **4 problemas de diseño**. Aplicala en LocalStack para ver cómo se comporta:
+Abrí `monitoring/alarm-mal-disenada.json`. Tiene **3 problemas de diseño**. Aplicala en LocalStack para ver cómo se comporta:
 
 ```bash
 awslocal cloudwatch put-metric-alarm --cli-input-json file://monitoring/alarm-mal-disenada.json
 awslocal cloudwatch describe-alarms --alarm-names alarma-cpu
 ```
 
-**Q4.** Identificá los 4 problemas. Para cada uno:
+**Q4.** Identificá los 3 problemas. Para cada uno:
 - Cuál es el problema
 - Qué pasaría en producción si esta alarma se deja así
 - Cómo lo corregirías
@@ -77,13 +77,11 @@ awslocal cloudwatch describe-alarms --alarm-names alarma-cpu
 | 1 | | | | |
 | 2 | | | | |
 | 3 | | | | |
-| 4 | | | | |
 
-_Pistas para revisar (mirar de a uno):_
-- ¿La alarma tiene destinatario? ¿Qué pasa si dispara?
-- ¿El umbral tiene sentido físico? (¿puede CPU pasar 100%?)
-- ¿Un solo período de 10 segundos es suficiente evidencia?
-- ¿`TreatMissingData: breaching` genera falsos positivos?
+_Pistas (de las slides + sentido común):_
+- **Buena alarma = accionable** (slide 7): ¿esta alarma tiene a quién avisarle?
+- **Umbral con sentido** (sentido común): ¿el número del `Threshold` es alcanzable?
+- **N períodos** (slide 7): ¿un solo período de 10s alcanza como evidencia, o va a disparar por picos?
 
 ---
 
