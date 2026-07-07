@@ -54,6 +54,10 @@ def main():
     print("Creando schema...")
     run_sql(cur, SQL_DIR / "001_schema.sql")
 
+    # Todas las tablas de Olist viven en el schema `analytics`.
+    # Fijar search_path para que INSERT INTO customers resuelva a analytics.customers.
+    cur.execute("SET search_path TO analytics, public;")
+
     print("Cargando datos...")
 
     n = load_csv(cur, "category_translations", DATA / "category_translations.csv",

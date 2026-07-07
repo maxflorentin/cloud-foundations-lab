@@ -2,6 +2,13 @@
 -- Source: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 -- License: CC BY-NC-SA 4.0 — https://creativecommons.org/licenses/by-nc-sa/4.0/
 -- Attribution: Olist (https://olist.com)
+--
+-- Todas las tablas viven en el schema `analytics` para separar analytics
+-- de la data transaccional (que va en el schema `public` con app_users, etc.)
+-- Ver docs/lab-08.md paso 3.
+
+CREATE SCHEMA IF NOT EXISTS analytics;
+SET search_path TO analytics;
 
 CREATE TABLE IF NOT EXISTS customers (
     customer_id             TEXT PRIMARY KEY,

@@ -250,6 +250,41 @@ def count_rows(identifier: str, password: str) -> None:
         print(f"  psql falló: {result.stderr.strip()[:200]}")
 
 
+def load_olist(identifier: str, password: str) -> None:
+    """Carga Olist en la RDS via load_postgres.py, apuntando al puerto forward que expone ministack."""
+    # Ministack mapea el puerto interno 5432 del container RDS a un puerto random en el host.
+    result = subprocess.run(
+        ["docker", "inspect", f"ministack-rds-{identifier}",
+         "--format", "{{ (index (index .NetworkSettings.Ports \"5432/tcp\") 0).HostPort }}"],
+        capture_output=True, text=True,
+    )
+    host_port = result.stdout.strip()
+    if not host_port:
+        print(f"  ⚠ no puedo detectar port forward del container. Skipping.")
+        return
+
+    env = {
+        **os.environ,
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": host_port,
+        "POSTGRES_USER": CFG["db_instance"]["MasterUsername"],
+        "POSTGRES_PASSWORD": password,
+        "POSTGRES_DB": CFG["db_instance"]["DBName"],
+    }
+    result = subprocess.run(
+        ["python3", str(ROOT / "scripts" / "load_postgres.py")],
+        env=env, capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        # Últimas líneas del load (los conteos de cada tabla)
+        for line in result.stdout.strip().splitlines()[-10:]:
+            print(f"    {line}")
+    else:
+        print(f"  load_postgres.py falló:")
+        print(f"    stdout: {result.stdout.strip()[:200]}")
+        print(f"    stderr: {result.stderr.strip()[:200]}")
+
+
 def take_snapshot(rds, identifier: str) -> str | None:
     snap_id = f"{identifier}-snap-{int(time.time())}"
     try:
@@ -314,7 +349,10 @@ def main() -> int:
     print("\n9. Verificar filas")
     count_rows(identifier, password)
 
-    print("\n10. Snapshot para backup")
+    print("\n10. Cargar Olist a schema analytics (mismo appdb, base separada por schema)")
+    load_olist(identifier, password)
+
+    print("\n11. Snapshot para backup")
     snap_id = take_snapshot(rds, identifier)
 
     print("\n=== Resumen ===")
@@ -323,10 +361,15 @@ def main() -> int:
     print(f"  DB SG:           {db_sg_id} ← solo deja entrar app-private-sg")
     print(f"  Snapshot:        {snap_id}")
     print()
+    print("Schemas dentro de appdb:")
+    print(f"  public/     → app_users, app_sessions, app_audit_log (transaccional)")
+    print(f"  analytics/  → customers, orders, products, ... (Olist)")
+    print()
     print("Inspección manual:")
     print(f"  awslocal rds describe-db-instances --db-instance-identifier {identifier}")
     print(f"  awslocal rds describe-db-snapshots --db-instance-identifier {identifier}")
     print(f"  docker exec -it ministack-rds-{identifier} psql -U app -d appdb")
+    print(f"  → \\dn (listar schemas)  \\dt analytics.* (tablas del analytics)")
     return 0
 
 
