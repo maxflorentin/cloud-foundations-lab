@@ -31,11 +31,13 @@ Salida esperada: 3 transiciones registradas (INSUFFICIENT_DATA → ALARM → OK)
 ## Copiar el workbook
 
 ```bash
-cp docs/lab-11-workbook.md docs/monitoring-proyecto.md
+cp docs/lab-11.md docs/monitoring-proyecto.md
 $EDITOR docs/monitoring-proyecto.md
 ```
 
 Todas las Q se responden ahí. `docs/monitoring-proyecto.md` es la entrega.
+
+> Trabajás sobre la copia, no sobre `docs/lab-11.md` (que queda como plantilla del repo).
 
 ---
 

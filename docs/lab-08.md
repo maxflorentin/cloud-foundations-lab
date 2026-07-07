@@ -49,7 +49,7 @@ Cada valor en `rds_config.json` es una decisión de arquitectura documentada:
 python3 scripts/rds_demo.py
 ```
 
-Hace 10 pasos en secuencia:
+Hace 11 pasos en secuencia:
 1. Crear secret en Secrets Manager
 2. Recuperar recursos de VPC del lab 07
 3. Crear SG de la DB (referencia al `app-private-sg`)
@@ -57,9 +57,10 @@ Hace 10 pasos en secuencia:
 5. `create-db-instance` — ministack levanta postgres real
 6. Esperar a `available`
 7. Consumir el secret (patrón: nunca password hardcodeada)
-8. Aplicar `seed.sql` al engine real
+8. Aplicar `seed.sql` al engine real (schema `public` con tablas transaccionales)
 9. Verificar filas
-10. Snapshot para backup
+10. Cargar Olist en schema `analytics` (reusa `scripts/load_postgres.py`)
+11. Snapshot para backup
 
 Output esperado incluye:
 ```
@@ -67,30 +68,77 @@ Output esperado incluye:
     app_users=5
     app_audit_log=5
 
-10. Snapshot para backup
+10. Cargar Olist a schema analytics
+      customers:             3000
+      orders:                3000
+      order_items:           3398
+      ...
+
+11. Snapshot para backup
   ✓ snapshot: app-db-snap-1783... (status=available)
 ```
 
-Si ves `app_users=5` es porque el `seed.sql` corrió sobre un postgres real dentro del container `ministack-rds-app-db`.
+Si ves esos números, `seed.sql` y Olist corrieron sobre un postgres real dentro del container `ministack-rds-app-db`.
 
 ---
 
-## Paso 3 — Explorar la DB a mano
+## Paso 3 — Un servidor RDS, dos schemas
+
+La instancia `app-db` tiene una sola base (`appdb`) pero **dos schemas** para separar el mundo transaccional del analítico. Es el patrón real de producción cuando las dos cargas comparten el mismo servidor:
+
+```
+appdb/
+├── public/       ← transaccional (del seed.sql)
+│   ├── app_users
+│   ├── app_sessions
+│   └── app_audit_log
+└── analytics/    ← analítico (Olist)
+    ├── customers
+    ├── orders
+    ├── order_items
+    ├── order_payments
+    ├── order_reviews
+    ├── products
+    ├── sellers
+    └── category_translations
+```
+
+**Por qué separar:** cargas transaccionales (lecturas/escrituras chicas, alta concurrencia) y analíticas (queries pesadas, batch) se pisan en performance. Aunque compartan la misma RDS, aislarlas por schema:
+- Permite dar `GRANT` distinto por rol (ej. read-only al analytics)
+- Facilita mover el schema a otra base cuando el volumen lo pida (sin refactor)
+- Documenta la intención en el nombre — el que abre la DB entiende qué es qué
+
+---
+
+## Paso 4 — Explorar la DB a mano
 
 ```bash
 # Conectarse al container postgres que ministack levantó
 docker exec -it ministack-rds-app-db psql -U app -d appdb
 
 # Dentro de psql:
-\dt                          # ver tablas
-SELECT * FROM app_users;     # ver los 5 usuarios seed
-INSERT INTO app_users (email, full_name) VALUES ('nuevo@test.com', 'Nuevo');
+\dn                              # listar schemas (public + analytics)
+\dt public.*                     # tablas transaccionales
+\dt analytics.*                  # tablas Olist
+SELECT * FROM app_users;         # público por default (search_path)
+SELECT COUNT(*) FROM analytics.customers;   # schema explícito
 \q
 ```
 
+**Ejemplo con join cross-schema** (mezclar datos transaccionales con lookups analíticos):
+
+```sql
+SELECT a.email, c.customer_state
+FROM app_users a
+JOIN analytics.customers c ON c.customer_unique_id = a.email
+LIMIT 5;
+```
+
+En prod probablemente no querés esta clase de join en runtime — usarías replicas o read models. Pero acá enseña que _un servidor puede tener múltiples workloads_.
+
 ---
 
-## Paso 4 — Snapshot y describir
+## Paso 5 — Snapshot y describir
 
 ```bash
 awslocal rds describe-db-instances \
@@ -105,7 +153,7 @@ En AWS real, los snapshots son la base de PITR (Point-in-Time Recovery): podés 
 
 ---
 
-## Paso 5 — El patrón operativo: rol + secret + SG
+## Paso 6 — El patrón operativo: rol + secret + SG
 
 Repasar cómo interactúan las capas del stack para llegar a la DB:
 
@@ -127,7 +175,7 @@ La app **nunca** tiene la password en código. La lee del secret usando su rol.
 
 ---
 
-## Paso 6 — Managed vs self-managed (concepto)
+## Paso 7 — Managed vs self-managed (concepto)
 
 RDS te quita **la operación**, no la base. Seguís diseñando schema y queries; delegás:
 
@@ -147,7 +195,7 @@ RDS te quita **la operación**, no la base. Seguís diseñando schema y queries;
 
 ---
 
-## Paso 7 — Documentar en `decisions.md`
+## Paso 8 — Documentar en `decisions.md`
 
 ```
 ### 009 — Multi-AZ false en dev, true en prod
@@ -177,16 +225,38 @@ acceso auditado en CloudTrail, control vía IAM.
 Resultado: app/db en Secrets Manager, mismo código de conexión que en prod real.
 ```
 
+```
+### 011 — Separar transaccional y analítico por schema, no por base
+
+Decision: la RDS del proyecto tiene una sola base (`appdb`) con dos schemas:
+`public` para tablas transaccionales (app_users, sessions, audit) y
+`analytics` para lookups analíticos (Olist, referenciales, dashboards).
+
+Contexto: en la misma base coexisten dos workloads con perfiles distintos.
+Separarlos en bases distintas obliga a 2 conexiones y complica joins ocasionales.
+
+Alternativas: 2 bases distintas, 2 RDS distintas, todo en `public`.
+
+Tradeoff: si el workload analítico crece mucho, va a competir por recursos con
+el transaccional. Cuando eso pase, el schema separado facilita mover
+`analytics` a otra RDS (o a Redshift/Athena) sin refactorizar toda la app.
+
+Resultado: schema `analytics` seteado como default para Olist via
+`search_path` en sql/001_schema.sql. La app hace SELECT sobre public por
+default y usa `analytics.<tabla>` para cross-schema.
+```
+
 ---
 
 ## Checkpoint
 
-- [ ] `rds_demo.py` corrió y muestra `app_users=5, app_audit_log=5`
+- [ ] `rds_demo.py` corrió los 11 pasos sin error
+- [ ] `app_users=5, app_audit_log=5` (schema public, transaccional)
+- [ ] Olist cargado en schema `analytics` (~15k filas totales)
+- [ ] `\dn` en psql muestra `public` y `analytics` como schemas separados
 - [ ] Snapshot creado con status `available`
-- [ ] `docker exec -it ministack-rds-app-db psql` responde (verificación manual)
 - [ ] SG de la DB referencia `app-private-sg` (no CIDR)
-- [ ] Secret creado y leído desde el script
-- [ ] Decisiones 009 y 010 en `decisions.md`
+- [ ] Decisiones 009, 010 y 011 en `decisions.md`
 
 ---
 
