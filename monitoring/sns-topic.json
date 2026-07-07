@@ -1,0 +1,11 @@
+{
+  "Name": "project-alerts",
+  "Attributes": {
+    "DisplayName": "Alertas del proyecto",
+    "FifoTopic": "false"
+  },
+  "Tags": [
+    { "Key": "Lab", "Value": "11" },
+    { "Key": "Purpose", "Value": "alarm-actions" }
+  ]
+}

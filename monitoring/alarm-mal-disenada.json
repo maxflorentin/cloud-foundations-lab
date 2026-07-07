@@ -1,0 +1,14 @@
+{
+  "AlarmName": "alarma-cpu",
+  "AlarmDescription": "cpu",
+  "ActionsEnabled": true,
+  "AlarmActions": [],
+  "MetricName": "CPUUtilization",
+  "Namespace": "AWS/EC2",
+  "Statistic": "Maximum",
+  "Period": 10,
+  "EvaluationPeriods": 1,
+  "Threshold": 100.0,
+  "ComparisonOperator": "GreaterThanThreshold",
+  "TreatMissingData": "breaching"
+}

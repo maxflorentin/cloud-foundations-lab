@@ -1,0 +1,26 @@
+{
+  "AlarmName": "TODO-poner-nombre-descriptivo",
+  "AlarmDescription": "TODO: describir qué está mal cuando esta alarma dispara",
+  "ActionsEnabled": true,
+  "AlarmActions": [
+    "arn:aws:sns:us-east-1:000000000000:project-alerts"
+  ],
+  "OKActions": [
+    "arn:aws:sns:us-east-1:000000000000:project-alerts"
+  ],
+  "MetricName": "TODO-nombre-de-la-metrica",
+  "Namespace": "TODO-servicio",
+  "Statistic": "TODO-Average-Sum-Minimum-Maximum-SampleCount",
+  "Dimensions": [
+    { "Name": "TODO", "Value": "TODO" }
+  ],
+  "Period": 0,
+  "EvaluationPeriods": 0,
+  "DatapointsToAlarm": 0,
+  "Threshold": 0.0,
+  "ComparisonOperator": "TODO-GreaterThanThreshold-LessThanThreshold-etc",
+  "TreatMissingData": "TODO-notBreaching-breaching-ignore-missing",
+  "Tags": [
+    { "Key": "Lab", "Value": "11" }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "AlarmName": "cpu-alta-web-tier",
+  "AlarmDescription": "CPU > 70% durante 3 períodos consecutivos de 60s en el ASG web-tier",
+  "ActionsEnabled": true,
+  "AlarmActions": [
+    "arn:aws:sns:us-east-1:000000000000:project-alerts"
+  ],
+  "OKActions": [
+    "arn:aws:sns:us-east-1:000000000000:project-alerts"
+  ],
+  "MetricName": "CPUUtilization",
+  "Namespace": "AWS/EC2",
+  "Statistic": "Average",
+  "Dimensions": [
+    { "Name": "AutoScalingGroupName", "Value": "web-tier-asg" }
+  ],
+  "Period": 60,
+  "EvaluationPeriods": 3,
+  "DatapointsToAlarm": 3,
+  "Threshold": 70.0,
+  "ComparisonOperator": "GreaterThanThreshold",
+  "TreatMissingData": "notBreaching",
+  "Tags": [
+    { "Key": "Lab", "Value": "11" }
+  ]
+}
