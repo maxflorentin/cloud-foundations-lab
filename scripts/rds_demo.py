@@ -1,14 +1,19 @@
 """
-Lab 08 — Tres formas de tener la base: postgres-on-EC2 vs docker vs RDS.
+Lab 08 — RDS con engine real via ministack.
 
-LocalStack 3.x community NO incluye RDS (es Pro). El lab pivota a comparación:
-  1. postgres-on-EC2: instancia con user_data_postgres.sh (self-managed)
-  2. docker postgres: container del compose (lo que tenemos)
-  3. RDS: documentado como referencia para AWS real
+Ministack levanta un container postgres:16-alpine cuando llamás
+`create-db-instance`. Toda la API funciona: crear, describir endpoint,
+snapshot, delete. El engine es SQL real.
 
-Las tres comparten el secret + el SG. Lo que cambia es la carga operativa.
-
-Cierra el stack base IAM(04) → EC2(05) → S3(06) → VPC(07) → datos (hoy).
+Flujo:
+1. Secret en Secrets Manager (credencial fuera del código)
+2. SG de la DB (referencia app-private-sg del lab 07)
+3. DB subnet group con las subnets privadas
+4. create-db-instance PostgreSQL — ministack levanta el container real
+5. Wait for 'available'
+6. Aplicar seed.sql (via docker exec al container que levantó ministack)
+7. Verificar datos con SQL real
+8. Snapshot para backup
 
 Uso:
     python scripts/rds_demo.py
@@ -18,6 +23,8 @@ import json
 import os
 import secrets as pysecrets
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import boto3
@@ -28,17 +35,6 @@ REGION = "us-east-1"
 ROOT = Path(__file__).parent.parent
 CFG = json.loads((ROOT / "rds" / "rds_config.json").read_text())
 SEED_SQL = ROOT / "rds" / "seed.sql"
-EC2_USER_DATA = ROOT / "ec2" / "user_data_postgres.sh"
-
-AMI_ID = "ami-0c02fb55956c7d316"
-INSTANCE_TYPE = "t3.micro"
-INSTANCE_TAG = "db-on-ec2"
-
-PG_HOST = "localhost"
-PG_PORT = 5432
-PG_USER = os.environ.get("POSTGRES_USER", "postgres")
-PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
-PG_DB = os.environ.get("POSTGRES_DB", "course")
 
 BOTO_KWARGS = dict(
     endpoint_url=ENDPOINT,
@@ -56,13 +52,15 @@ def _already_exists(e: ClientError) -> bool:
     code = e.response["Error"].get("Code", "")
     return (
         "AlreadyExists" in code
-        or "Duplicate" in code
         or "already exists" in code.lower()
-        or "ResourceExistsException" == code
+        or code == "ResourceExistsException"
+        or "DBInstanceAlreadyExists" in code
     )
 
 
-def create_secret(sm):
+# ── pasos ─────────────────────────────────────────────────────────────────────
+
+def create_secret(sm) -> str:
     name = CFG["secret"]["Name"]
     password = pysecrets.token_urlsafe(16)
     payload = {
@@ -70,7 +68,6 @@ def create_secret(sm):
         "password": password,
         "dbname": CFG["db_instance"]["DBName"],
         "port": CFG["db_instance"]["Port"],
-        "host": f"{PG_HOST}:{PG_PORT}",
     }
     try:
         sm.create_secret(
@@ -109,7 +106,7 @@ def get_vpc_resources(ec2):
     print(f"  VPC:             {vpc_id}")
     print(f"  Subnet privada:  {private_subnets[0]['SubnetId']} ({private_subnets[0]['CidrBlock']})")
     print(f"  SG de la app:    {app_sg[0]['GroupId']} (app-private-sg)")
-    return vpc_id, private_subnets[0]["SubnetId"], app_sg[0]["GroupId"]
+    return vpc_id, [s["SubnetId"] for s in private_subnets], app_sg[0]["GroupId"]
 
 
 def create_db_sg(ec2, vpc_id: str, app_sg_id: str) -> str:
@@ -148,166 +145,190 @@ def create_db_sg(ec2, vpc_id: str, app_sg_id: str) -> str:
     return sg_id
 
 
-def launch_db_on_ec2(ec2, subnet_id: str, db_sg_id: str) -> str:
-    """Postgres self-managed: EC2 con user-data que instala postgres-server."""
-    existing = ec2.describe_instances(Filters=[
-        {"Name": "tag:Name", "Values": [INSTANCE_TAG]},
-        {"Name": "instance-state-name", "Values": ["running", "pending"]},
-    ])["Reservations"]
-    if existing:
-        iid = existing[0]["Instances"][0]["InstanceId"]
-        print(f"  instancia '{INSTANCE_TAG}' ya existe: {iid}")
-        return iid
-
-    user_data = EC2_USER_DATA.read_text()
-    resp = ec2.run_instances(
-        ImageId=AMI_ID,
-        InstanceType=INSTANCE_TYPE,
-        MinCount=1, MaxCount=1,
-        SubnetId=subnet_id,
-        SecurityGroupIds=[db_sg_id],
-        UserData=user_data,
-        IamInstanceProfile={"Name": "app-instance-profile"},
-        TagSpecifications=[{
-            "ResourceType": "instance",
-            "Tags": [
-                {"Key": "Name", "Value": INSTANCE_TAG},
-                {"Key": "Role", "Value": "database"},
-                {"Key": "ManagedBy", "Value": "self"},
-                {"Key": "Lab", "Value": "08"},
-            ],
-        }],
-    )
-    iid = resp["Instances"][0]["InstanceId"]
-    print(f"  instancia '{INSTANCE_TAG}' lanzada: {iid}")
-    print(f"  user-data: {EC2_USER_DATA.name} ({len(user_data)} chars, NO se ejecuta en LocalStack)")
-    return iid
+def create_db_subnet_group(rds, subnets: list) -> str:
+    name = CFG["db_subnet_group"]["Name"]
+    try:
+        rds.create_db_subnet_group(
+            DBSubnetGroupName=name,
+            DBSubnetGroupDescription=CFG["db_subnet_group"]["Description"],
+            SubnetIds=subnets,
+        )
+        print(f"  DB subnet group '{name}' creado")
+    except ClientError as e:
+        if _already_exists(e):
+            print(f"  DB subnet group '{name}' ya existe")
+        else:
+            raise
+    return name
 
 
-def show_rds_reference():
+def create_db_instance(rds, db_sg_id: str, subnet_group: str, password: str) -> str:
     cfg = CFG["db_instance"]
-    print(f"  En AWS real / LocalStack Pro, el equivalente managed:\n")
-    print(f"    aws rds create-db-instance \\")
-    print(f"      --db-instance-identifier {cfg['Identifier']} \\")
-    print(f"      --engine {cfg['Engine']} --engine-version {cfg['EngineVersion']} \\")
-    print(f"      --db-instance-class {cfg['InstanceClass']} \\")
-    print(f"      --allocated-storage {cfg['AllocatedStorage']} --storage-encrypted \\")
-    print(f"      --master-username {cfg['MasterUsername']} \\")
-    print(f"      --master-user-password '<from secret>' \\")
-    print(f"      --db-name {cfg['DBName']} \\")
-    print(f"      --backup-retention-period {cfg['BackupRetentionPeriod']} \\")
-    print(f"      --no-multi-az --no-publicly-accessible \\")
-    print(f"      --vpc-security-group-ids <db-sg> --db-subnet-group-name course-db-subnets")
-    print()
-    print(f"  Lo que esa línea te ahorra (vs postgres-on-EC2):")
-    print(f"    - instalar postgres-server, init, configurar listen y pg_hba")
-    print(f"    - automatizar backups + retention + PITR")
-    print(f"    - aplicar minor version patches")
-    print(f"    - Multi-AZ con standby síncrono")
-    print(f"    - monitoring + métricas en CloudWatch")
+    identifier = cfg["Identifier"]
+    try:
+        rds.create_db_instance(
+            DBInstanceIdentifier=identifier,
+            Engine=cfg["Engine"],
+            DBInstanceClass=cfg["InstanceClass"],
+            AllocatedStorage=cfg["AllocatedStorage"],
+            MasterUsername=cfg["MasterUsername"],
+            MasterUserPassword=password,
+            DBName=cfg["DBName"],
+            Port=cfg["Port"],
+            BackupRetentionPeriod=cfg["BackupRetentionPeriod"],
+            MultiAZ=cfg["MultiAZ"],
+            StorageEncrypted=cfg["StorageEncrypted"],
+            PubliclyAccessible=cfg["PubliclyAccessible"],
+            VpcSecurityGroupIds=[db_sg_id],
+            DBSubnetGroupName=subnet_group,
+        )
+        print(f"  RDS '{identifier}' creada — ministack está levantando el container postgres...")
+    except ClientError as e:
+        if _already_exists(e):
+            print(f"  RDS '{identifier}' ya existe")
+        else:
+            raise
+    return identifier
 
 
-def show_secret_consumption(sm):
+def wait_available(rds, identifier: str, timeout_s: int = 60) -> dict:
+    """Espera hasta que el instance status sea 'available'."""
+    for _ in range(timeout_s):
+        inst = rds.describe_db_instances(DBInstanceIdentifier=identifier)["DBInstances"][0]
+        status = inst["DBInstanceStatus"]
+        if status == "available":
+            endpoint = inst.get("Endpoint", {})
+            print(f"  status: {status}")
+            print(f"  endpoint: {endpoint.get('Address')}:{endpoint.get('Port')}")
+            print(f"  engine:   {inst['Engine']} {inst.get('EngineVersion', '')}")
+            return inst
+        time.sleep(1)
+    raise SystemExit(f"ERROR: RDS '{identifier}' no llegó a 'available' en {timeout_s}s")
+
+
+def apply_seed(identifier: str, password: str) -> None:
+    """Aplica el seed.sql via docker exec al container que levantó ministack."""
+    container = f"ministack-rds-{identifier}"
+
+    result = subprocess.run(
+        ["docker", "exec", container, "pg_isready", "-U", CFG["db_instance"]["MasterUsername"]],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"  ⚠ container {container} no responde. ¿Ministack levantó bien la instancia?")
+        return
+
+    seed_content = SEED_SQL.read_text()
+    result = subprocess.run(
+        ["docker", "exec", "-i", container,
+         "psql", "-U", CFG["db_instance"]["MasterUsername"],
+         "-d", CFG["db_instance"]["DBName"], "-v", "ON_ERROR_STOP=1", "-q"],
+        input=seed_content, capture_output=True, text=True,
+        env={**os.environ, "PGPASSWORD": password},
+    )
+    if result.returncode == 0:
+        print(f"  ✓ seed.sql aplicado al engine real")
+    else:
+        print(f"  psql falló: {result.stderr.strip()[:300]}")
+
+
+def count_rows(identifier: str, password: str) -> None:
+    container = f"ministack-rds-{identifier}"
+    result = subprocess.run(
+        ["docker", "exec", "-i", container,
+         "psql", "-U", CFG["db_instance"]["MasterUsername"],
+         "-d", CFG["db_instance"]["DBName"], "-tA", "-c",
+         "SELECT 'app_users=' || count(*) FROM app_users UNION ALL "
+         "SELECT 'app_audit_log=' || count(*) FROM app_audit_log;"],
+        capture_output=True, text=True,
+        env={**os.environ, "PGPASSWORD": password},
+    )
+    if result.returncode == 0:
+        for line in result.stdout.strip().splitlines():
+            print(f"    {line.strip()}")
+    else:
+        print(f"  psql falló: {result.stderr.strip()[:200]}")
+
+
+def take_snapshot(rds, identifier: str) -> str | None:
+    snap_id = f"{identifier}-snap-{int(time.time())}"
+    try:
+        rds.create_db_snapshot(
+            DBSnapshotIdentifier=snap_id,
+            DBInstanceIdentifier=identifier,
+        )
+        time.sleep(1)
+        snap = rds.describe_db_snapshots(DBSnapshotIdentifier=snap_id)["DBSnapshots"][0]
+        print(f"  ✓ snapshot: {snap_id} (status={snap['Status']})")
+        return snap_id
+    except ClientError as e:
+        print(f"  snapshot falló: {e}")
+        return None
+
+
+def show_secret_consumption(sm, endpoint_host: str):
     name = CFG["secret"]["Name"]
     creds = json.loads(sm.get_secret_value(SecretId=name)["SecretString"])
     print(f"  app lee secret '{name}':")
     print(f"    username = {creds['username']}")
     print(f"    password = {'*' * len(creds['password'])}  (no se imprime)")
-    print(f"    host     = {creds['host']}")
+    print(f"    host     = {endpoint_host}")
     print(f"    dbname   = {creds['dbname']}")
-    print(f"  → psycopg2.connect(**parsed_secret) — mismo código para las 3 opciones")
+    print(f"  → psycopg2.connect(**parsed_secret)")
 
 
-def run_seed_against_postgres():
-    env = {**os.environ, "PGPASSWORD": PG_PASSWORD}
-    cmd_base = ["psql", "-h", PG_HOST, "-p", str(PG_PORT), "-U", PG_USER, "-d", PG_DB, "-v", "ON_ERROR_STOP=1"]
+# ── main ──────────────────────────────────────────────────────────────────────
 
-    try:
-        subprocess.run(cmd_base + ["-q", "-f", str(SEED_SQL)], env=env, check=True, capture_output=True, text=True)
-        print(f"  seed.sql aplicado a docker postgres ({PG_HOST}:{PG_PORT}/{PG_DB})")
-    except FileNotFoundError:
-        print("  psql no instalado. Instalá: sudo apt install -y postgresql-client")
-        return False
-    except subprocess.CalledProcessError as e:
-        if "refused" in e.stderr.lower() or "connection" in e.stderr.lower():
-            print(f"  postgres no responde. Corré 'docker compose up -d postgres'")
-        else:
-            print(f"  psql falló: {e.stderr.strip()[:200]}")
-        return False
-
-    result = subprocess.run(
-        cmd_base + ["-tA", "-c",
-         "SELECT 'app_users=' || count(*) FROM app_users UNION ALL "
-         "SELECT 'app_audit_log=' || count(*) FROM app_audit_log;"],
-        env=env, check=True, capture_output=True, text=True,
-    )
-    for line in result.stdout.strip().splitlines():
-        print(f"    {line.strip()}")
-    return True
-
-
-def comparison_table(db_on_ec2_iid: str):
-    print()
-    print("  ┌─────────────────────────────┬──────────────┬──────────────┬──────────────┐")
-    print("  │ Tarea                       │ Postgres-EC2 │ Docker pg    │ RDS          │")
-    print("  ├─────────────────────────────┼──────────────┼──────────────┼──────────────┤")
-    print("  │ Instalar el motor           │ vos          │ docker image │ AWS          │")
-    print("  │ Iniciar el servicio         │ vos (systemd)│ docker       │ AWS          │")
-    print("  │ Parchear minor versions     │ vos          │ vos (rebuild)│ AWS          │")
-    print("  │ Backups automáticos         │ vos (cron)   │ vos          │ AWS          │")
-    print("  │ Point-in-time recovery      │ vos (custom) │ no           │ AWS (7-35d)  │")
-    print("  │ Multi-AZ failover           │ vos          │ no           │ AWS (1 flag) │")
-    print("  │ Read replicas               │ vos          │ no           │ AWS (1 flag) │")
-    print("  │ Monitoring métrico          │ vos          │ vos          │ CloudWatch   │")
-    print("  │ Encryption at rest          │ vos (LUKS)   │ depende      │ KMS (1 flag) │")
-    print("  │ Rotación de credenciales    │ vos          │ vos          │ Secrets+Lmb  │")
-    print("  └─────────────────────────────┴──────────────┴──────────────┴──────────────┘")
-    print()
-    print(f"  postgres-on-EC2 modelada en LocalStack: {db_on_ec2_iid}")
-    print(f"  docker postgres: corriendo, engine real para el lab")
-    print(f"  RDS: ver comandos arriba, ejecutar en Learner Lab para verlo end-to-end")
-
-
-def main():
-    print("=== Lab 08 — Tres formas de tener la base ===\n")
-    print("LocalStack 3.x community no incluye RDS. Comparamos:")
-    print("  1. postgres-on-EC2 (self-managed) — EC2 modelada con user-data")
-    print("  2. docker postgres — el container del compose (engine real)")
-    print("  3. RDS — referencia para AWS real / Learner Lab\n")
+def main() -> int:
+    print("=== Lab 08 — RDS con engine real (via ministack) ===\n")
 
     ec2 = client("ec2")
+    rds = client("rds")
     sm = client("secretsmanager")
 
-    print("1. Secret en Secrets Manager (común a las 3 opciones)")
-    create_secret(sm)
+    print("1. Secret en Secrets Manager")
+    password = create_secret(sm)
 
     print("\n2. Recursos de la VPC (reuso de lab 07)")
-    vpc_id, subnet_id, app_sg_id = get_vpc_resources(ec2)
+    vpc_id, subnets, app_sg_id = get_vpc_resources(ec2)
 
-    print("\n3. SG db-sg (referencia por SG, no CIDR — común a las 3)")
+    print("\n3. SG de la DB (referencia por SG, no CIDR)")
     db_sg_id = create_db_sg(ec2, vpc_id, app_sg_id)
 
-    print("\n4. Opción 1 — postgres-on-EC2: instancia con user_data_postgres.sh")
-    db_on_ec2_iid = launch_db_on_ec2(ec2, subnet_id, db_sg_id)
+    print("\n4. DB subnet group")
+    subnet_group = create_db_subnet_group(rds, subnets)
 
-    print("\n5. Opción 2 — docker postgres: aplicar seed.sql (engine real)")
-    sql_ok = run_seed_against_postgres()
+    print("\n5. create-db-instance — ministack levanta un container postgres real")
+    identifier = create_db_instance(rds, db_sg_id, subnet_group, password)
 
-    print("\n6. Opción 3 — RDS: cómo se haría en AWS real")
-    show_rds_reference()
+    print("\n6. Esperar a 'available'")
+    inst = wait_available(rds, identifier)
+    endpoint_host = inst.get("Endpoint", {}).get("Address", "")
 
-    print("\n7. Cómo la app consume el secret (idéntico para las 3)")
-    show_secret_consumption(sm)
+    print("\n7. Consumir el secret (patrón de app: nunca password hardcodeada)")
+    show_secret_consumption(sm, endpoint_host)
 
-    print("\n=== Comparación: quién hace qué ===")
-    comparison_table(db_on_ec2_iid)
+    print("\n8. Aplicar seed.sql al engine SQL real")
+    apply_seed(identifier, password)
 
-    print("Inspección:")
-    print(f"  awslocal secretsmanager get-secret-value --secret-id {CFG['secret']['Name']}")
-    print(f"  awslocal ec2 describe-instances --instance-ids {db_on_ec2_iid}")
-    print(f"  awslocal ec2 describe-instance-attribute --instance-id {db_on_ec2_iid} --attribute userData")
-    print(f"  PGPASSWORD={PG_PASSWORD} psql -h {PG_HOST} -U {PG_USER} -d {PG_DB}")
+    print("\n9. Verificar filas")
+    count_rows(identifier, password)
+
+    print("\n10. Snapshot para backup")
+    snap_id = take_snapshot(rds, identifier)
+
+    print("\n=== Resumen ===")
+    print(f"  RDS instance:    {identifier} ({endpoint_host})")
+    print(f"  Secret:          {CFG['secret']['Name']}")
+    print(f"  DB SG:           {db_sg_id} ← solo deja entrar app-private-sg")
+    print(f"  Snapshot:        {snap_id}")
+    print()
+    print("Inspección manual:")
+    print(f"  awslocal rds describe-db-instances --db-instance-identifier {identifier}")
+    print(f"  awslocal rds describe-db-snapshots --db-instance-identifier {identifier}")
+    print(f"  docker exec -it ministack-rds-{identifier} psql -U app -d appdb")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
