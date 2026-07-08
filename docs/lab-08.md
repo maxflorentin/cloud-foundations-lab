@@ -24,6 +24,8 @@ Las tres comparten el mismo secret (Secrets Manager) y el mismo security group (
 - Labs previos corridos en orden:
   - Lab 02: `python scripts/ec2_demo.py` (necesario para `app-instance-profile`) 
   - Lab 04: `python scripts/iam_demo.py` (necesario para `app-role`)
+  - Lab 04: `python scripts/iam_demo.py` (necesario para `app-role`)
+  - Lab 05: `python scripts/ec2_demo.py` (necesario para `app-instance-profile`)
   - Lab 07: `python scripts/vpc_demo.py` (necesario para `course-vpc`, `app-private-sg`)
 - Servicios: `docker compose up -d` (incluye `localstack` y `postgres`)
 - `awslocal --version` responde · `psql --version` responde
