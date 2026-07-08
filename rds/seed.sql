@@ -1,3 +1,4 @@
+
 -- Lab 08 — Seed de la base de datos de la app
 -- Tablas transaccionales (distintas de la lake de Olist en S3)
 
@@ -37,3 +38,4 @@ INSERT INTO app_audit_log (user_id, action) VALUES
     (3, 'user.created'),
     (4, 'user.created'),
     (5, 'user.created');
+

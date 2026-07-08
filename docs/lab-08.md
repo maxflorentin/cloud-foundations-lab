@@ -22,6 +22,8 @@ Las tres comparten el mismo secret (Secrets Manager) y el mismo security group (
 
 - Branch `lab-08-tuNombre` desde main
 - Labs previos corridos en orden:
+  - Lab 02: `python scripts/ec2_demo.py` (necesario para `app-instance-profile`) 
+  - Lab 04: `python scripts/iam_demo.py` (necesario para `app-role`)
   - Lab 04: `python scripts/iam_demo.py` (necesario para `app-role`)
   - Lab 05: `python scripts/ec2_demo.py` (necesario para `app-instance-profile`)
   - Lab 07: `python scripts/vpc_demo.py` (necesario para `course-vpc`, `app-private-sg`)
@@ -36,10 +38,8 @@ Las tres comparten el mismo secret (Secrets Manager) y el mismo security group (
 
 ```bash
 # Verificar
-awslocal ec2 describe-vpcs --filters Name=tag:Name,Values=course-vpc \
-  --query "Vpcs[0].VpcId" --output text
-awslocal iam get-instance-profile --instance-profile-name app-instance-profile \
-  --query "InstanceProfile.Arn"
+awslocal ec2 describe-vpcs --filters Name=tag:Name,Values=course-vpc --query "Vpcs[0].VpcId" --output text
+awslocal iam get-instance-profile --instance-profile-name app-instance-profile --query "InstanceProfile.Arn"
 docker compose ps postgres
 ```
 
