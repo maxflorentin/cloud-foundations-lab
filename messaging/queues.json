@@ -1,0 +1,27 @@
+{
+  "dlq": {
+    "Name": "events-dlq",
+    "Attributes": {
+      "MessageRetentionPeriod": "1209600"
+    }
+  },
+  "queues": [
+    {
+      "Name": "events-analytics",
+      "Attributes": {
+        "VisibilityTimeout": "30",
+        "MessageRetentionPeriod": "345600"
+      }
+    },
+    {
+      "Name": "events-audit",
+      "Attributes": {
+        "VisibilityTimeout": "30",
+        "MessageRetentionPeriod": "345600"
+      }
+    }
+  ],
+  "redrive": {
+    "maxReceiveCount": "3"
+  }
+}

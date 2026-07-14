@@ -1,0 +1,6 @@
+{
+  "Name": "events-topic",
+  "Attributes": {
+    "DisplayName": "Fan-out de eventos a analytics + audit"
+  }
+}

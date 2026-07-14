@@ -1,0 +1,7 @@
+{
+  "QueueName": "cola-legacy",
+  "Attributes": {
+    "VisibilityTimeout": "5",
+    "MessageRetentionPeriod": "60"
+  }
+}
