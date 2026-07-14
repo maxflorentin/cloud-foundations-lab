@@ -7,7 +7,7 @@ Flujo end-to-end:
 3. Subscribir ambas queues al topic (fan-out)
 4. Publicar N eventos de github_events.jsonl al topic
 5. Consumir de events-analytics con dedupe Redis
-6. Enviar un mensaje "envenenado" y verificar que llega a DLQ tras 3 fallos
+6. Enviar un poison message y verificar que llega a DLQ tras 3 fallos
 
 Uso:
     python scripts/messaging_demo.py            # flujo completo, 5 mensajes
@@ -180,12 +180,12 @@ def poison_message_demo(sqs, queue_url: str, dlq_url: str) -> None:
         Attributes={"VisibilityTimeout": "1"},
     )
 
-    # Enviar el mensaje envenenado
+    # Enviar el poison message
     sqs.send_message(
         QueueUrl=queue_url,
         MessageBody=json.dumps({"type": "POISON", "reason": "consumer falla siempre"}),
     )
-    print(f"  enviado mensaje POISON a events-analytics")
+    print(f"  enviado poison message a events-analytics")
 
     # Simular 3 intentos de procesamiento que "fallan" (no delete)
     for attempt in range(1, 5):
@@ -209,7 +209,7 @@ def poison_message_demo(sqs, queue_url: str, dlq_url: str) -> None:
         QueueUrl=dlq_url, AttributeNames=["ApproximateNumberOfMessages"],
     )
     dlq_count = int(dlq_attrs["Attributes"]["ApproximateNumberOfMessages"])
-    print(f"  DLQ ahora contiene: {dlq_count} mensajes envenenados")
+    print(f"  DLQ ahora contiene: {dlq_count} poison messages")
 
     # Restaurar VisibilityTimeout
     sqs.set_queue_attributes(
@@ -261,7 +261,7 @@ def main() -> int:
     print("Inspección:")
     print(f"  awslocal sqs get-queue-attributes --queue-url {queues['events-analytics']} --attribute-names All")
     print(f"  awslocal sns list-subscriptions-by-topic --topic-arn {topic_arn}")
-    print(f"  awslocal sqs receive-message --queue-url {dlq_url}   # ver mensajes envenenados")
+    print(f"  awslocal sqs receive-message --queue-url {dlq_url}   # ver poison messages")
     return 0
 
 

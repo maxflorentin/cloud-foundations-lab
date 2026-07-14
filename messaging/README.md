@@ -50,7 +50,7 @@ Cuatro archivos que declaran el pipeline SNS → 2 SQS + DLQ + una cola mal-conf
 - **`MessageRetentionPeriod: 345600`** (4 días) — un consumer caído tiene 4 días para volver antes de perder mensajes
 - **`VisibilityTimeout: 30`** — el consumer tiene 30s para procesar antes de que el mensaje vuelva a la cola
 - **`maxReceiveCount: 3`** — un mensaje se intenta procesar 3 veces; después va al DLQ
-- **DLQ separada** (`events-dlq`) — los mensajes envenenados se aíslan para análisis
+- **DLQ separada** (`events-dlq`) — los poison messages se aíslan para análisis
 
 ## Por qué SNS + SQS y no SQS solo
 
