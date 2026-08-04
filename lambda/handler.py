@@ -1,5 +1,4 @@
 import json
-import os
 import time
 
 # --- init (fuera del handler): se ejecuta sólo en cold start ---

@@ -21,6 +21,9 @@ Verificar:
 awslocal lambda list-functions   # debe responder sin error
 ```
 
+> **Si `awslocal` no está disponible**, usá `aws --endpoint-url=http://localhost:4566 --region us-east-1`
+> en lugar de `awslocal` en todos los comandos del lab.
+
 Variables que vas a usar en todos los comandos:
 
 ```bash
@@ -74,7 +77,7 @@ awslocal iam attach-role-policy \
 ## Paso 2 — Crear la función
 
 ```bash
-zip function.zip lambda/handler.py
+zip -j function.zip lambda/handler.py   # -j: guarda solo el nombre, no el path
 
 awslocal lambda create-function \
   --function-name $FN \
@@ -115,11 +118,15 @@ time awslocal lambda invoke --function-name $FN \
 
 Completá la tabla con los resultados (`cold_start` viene del JSON del body; `Init Duration` viene de los logs en el paso siguiente):
 
-| invocación | `cold_start` en body | duración `time` | `Billed Duration` (logs) | `Init Duration` (logs) |
-|---|---|---|---|---|
-| 1 | | | | |
-| 2 | | | | |
-| 3 | | | | |
+| invocación | `cold_start` en body | duración `time` | `Billed Duration` (logs) |
+|---|---|---|---|
+| 1 | | | |
+| 2 | | | |
+| 3 | | | |
+
+> **Nota sobre `Init Duration`:** en AWS real aparece en la línea REPORT de la primera invocación.
+> En ministack/LocalStack Community no se emite — el campo `cold_start` del JSON que imprime el handler
+> es la evidencia equivalente.
 
 Probá también el camino de rechazo:
 
@@ -137,6 +144,17 @@ echo '{"monto": 90000}' | \
 ```bash
 awslocal logs tail /aws/lambda/$FN --format short
 ```
+
+> `logs tail` requiere AWS CLI v2. Con v1, alternativa:
+> ```bash
+> aws --endpoint-url=http://localhost:4566 logs describe-log-streams \
+>   --log-group-name /aws/lambda/$FN --order-by LastEventTime \
+>   --query 'logStreams[].logStreamName' --output text
+> # luego, para cada stream:
+> aws --endpoint-url=http://localhost:4566 logs get-log-events \
+>   --log-group-name /aws/lambda/$FN --log-stream-name <stream-name> \
+>   --query 'events[].message' --output text
+> ```
 
 Buscá la línea `REPORT` de cada invocación:
 
@@ -189,7 +207,7 @@ Precios actuales: https://aws.amazon.com/lambda/pricing/
 El script `scripts/lambda_demo.py` hace los pasos 1–5 en un solo comando:
 
 ```bash
-python scripts/lambda_demo.py
+python3 scripts/lambda_demo.py
 ```
 
 Útil para ver el flujo completo automatizado y como referencia de cómo se hace con boto3 en lugar de la CLI.
@@ -197,8 +215,8 @@ python scripts/lambda_demo.py
 Experimento de memoria desde el script:
 
 ```bash
-python scripts/lambda_demo.py --memory 128
-python scripts/lambda_demo.py --memory 1024
+python3 scripts/lambda_demo.py --memory 128
+python3 scripts/lambda_demo.py --memory 1024
 ```
 
 ---
@@ -207,6 +225,7 @@ python scripts/lambda_demo.py --memory 1024
 
 ```bash
 awslocal lambda delete-function --function-name $FN
+awslocal logs delete-log-group --log-group-name /aws/lambda/$FN
 awslocal iam detach-role-policy --role-name $ROLE \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 awslocal iam delete-role --role-name $ROLE
@@ -216,7 +235,7 @@ rm -f function.zip out1.json out2.json out3.json event.json
 O con el script:
 
 ```bash
-python scripts/lambda_demo.py --cleanup
+python3 scripts/lambda_demo.py --cleanup
 ```
 
 > Serverless también deja basura si no la limpiás: funciones huérfanas, roles con
@@ -241,7 +260,7 @@ python scripts/lambda_demo.py --cleanup
 | # | Criterio | Peso |
 |---|---|---|
 | 1 | La función se crea y responde a ambos casos (aprobado / rechazado) | 25% |
-| 2 | Evidencia clara de la diferencia frío vs caliente (`Init Duration` en logs) | 25% |
+| 2 | Evidencia clara de la diferencia frío vs caliente (`cold_start` en body + duración) | 25% |
 | 3 | Lectura correcta del `REPORT`: billed duration y memoria usada | 20% |
 | 4 | Cálculo de costo y breakeven razonados con tus números reales | 20% |
 | 5 | Limpieza de recursos + reflexión de cierre | 10% |
@@ -250,11 +269,13 @@ python scripts/lambda_demo.py --cleanup
 
 ## Límites del entorno
 
-LocalStack Community corre Lambdas reales en Docker: `create-function`, `invoke`,
-`update-function-configuration` y `logs` funcionan tal cual. Lo que **no** podés
-probar acá:
+El emulador local (ministack/LocalStack Community) corre Lambdas reales en Docker:
+`create-function`, `invoke`, `update-function-configuration` y `logs` funcionan tal cual.
+Lo que **no** podés probar acá:
 
 - **Provisioned concurrency** y **SnapStart** → requieren AWS real.
+- **`Init Duration`** en la línea REPORT → ministack no la emite; el campo `cold_start`
+  del JSON del handler es la evidencia equivalente para este entorno.
 - Los tiempos absolutos no son representativos de AWS real. **La diferencia
   relativa frío/caliente sí es válida** — es lo que estamos midiendo.
 

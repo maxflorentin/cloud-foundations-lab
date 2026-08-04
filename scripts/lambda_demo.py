@@ -17,7 +17,6 @@ Uso:
 """
 
 import argparse
-import base64
 import io
 import json
 import time
@@ -332,11 +331,11 @@ def run(memory_mb: int):
     invocations = tail_logs(logs)
     if invocations:
         print_reports(invocations)
-        # usar la primera invocación del cold start para el cálculo de costo
-        first = next((inv for inv in invocations if inv.get("cold_start") is True and "billed_ms" in inv),
-                     next((inv for inv in invocations if "billed_ms" in inv), {}))
-        billed = first.get("billed_ms", 1.0)
-        mem = first.get("memory_mb", memory_mb)
+        # costo basado en warm: a escala, la gran mayoría de invocaciones son warm
+        warm = next((inv for inv in invocations if inv.get("cold_start") is False and "billed_ms" in inv),
+                    next((inv for inv in invocations if "billed_ms" in inv), {}))
+        billed = warm.get("billed_ms", 1.0)
+        mem = warm.get("memory_mb", memory_mb)
         print_cost(billed, mem)
     else:
         print("[Logs] Sin datos todavía. Corré: aws --endpoint-url=http://localhost:4566 logs tail /aws/lambda/validar-pago")
