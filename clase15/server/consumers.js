@@ -24,29 +24,29 @@ const ultimos = {
   reset() { this.checkpoint = 0; this.state = { items: [] }; },
 };
 
-// ── C2: mínimo ────────────────────────────────────────────────────────────────
-// Enseña: agregación monótona — inmune a duplicados por naturaleza.
-const minimo = {
-  name: 'minimo', checkpoint: 0,
-  state: { numero: null, user: null },
+// ── C2: usuarios únicos ───────────────────────────────────────────────────────
+// Enseña: deduplicación por clave de negocio — cuántos participantes distintos.
+const usuarios = {
+  name: 'usuarios', checkpoint: 0,
+  state: { users: new Set(), count: 0 },
   handle(ev) {
-    if (this.state.numero === null || ev.numero < this.state.numero) {
-      this.state.numero = ev.numero; this.state.user = ev.user;
-    }
+    this.state.users.add(ev.user);
+    this.state.count = this.state.users.size;
   },
-  reset() { this.checkpoint = 0; this.state = { numero: null, user: null }; },
+  reset() { this.checkpoint = 0; this.state = { users: new Set(), count: 0 }; },
 };
 
-// ── C3: máximo ────────────────────────────────────────────────────────────────
-const maximo = {
-  name: 'maximo', checkpoint: 0,
-  state: { numero: null, user: null },
+// ── C3: alumno más activo ─────────────────────────────────────────────────────
+// Enseña: agregación por partition key — quién produjo más eventos.
+const mas_activo = {
+  name: 'mas_activo', checkpoint: 0,
+  state: { counts: new Map(), user: null, total: 0 },
   handle(ev) {
-    if (this.state.numero === null || ev.numero > this.state.numero) {
-      this.state.numero = ev.numero; this.state.user = ev.user;
-    }
+    const c = (this.state.counts.get(ev.user) || 0) + 1;
+    this.state.counts.set(ev.user, c);
+    if (c > this.state.total) { this.state.user = ev.user; this.state.total = c; }
   },
-  reset() { this.checkpoint = 0; this.state = { numero: null, user: null }; },
+  reset() { this.checkpoint = 0; this.state = { counts: new Map(), user: null, total: 0 }; },
 };
 
 // ── C4: moda (rompible por duplicados) ───────────────────────────────────────
@@ -124,7 +124,7 @@ const lento = {
   },
 };
 
-const all = [ultimos, minimo, maximo, moda, ventana, lento];
+const all = [ultimos, usuarios, mas_activo, moda, ventana, lento];
 
 function tick() {
   const total = log.length();
@@ -159,11 +159,11 @@ function snapshot() {
   return {
     logLength: total,
     consumers: {
-      minimo:  { lag: total - minimo.checkpoint,  ...minimo.state },
-      maximo:  { lag: total - maximo.checkpoint,  ...maximo.state },
-      moda:    { lag: total - moda.checkpoint, idempotent: moda.idempotent, top: moda.state.top },
-      ventana: { lag: total - ventana.checkpoint, ...ventana.state },
-      lento:   { lag: total - lento.checkpoint,   top: lento.state.top },
+      usuarios:   { lag: total - usuarios.checkpoint,   count: usuarios.state.count },
+      mas_activo: { lag: total - mas_activo.checkpoint, user: mas_activo.state.user, total: mas_activo.state.total },
+      moda:       { lag: total - moda.checkpoint, idempotent: moda.idempotent, top: moda.state.top },
+      ventana:    { lag: total - ventana.checkpoint, ...ventana.state },
+      lento:      { lag: total - lento.checkpoint,   top: lento.state.top },
     },
     ultimos: ultimos.state.items,
   };

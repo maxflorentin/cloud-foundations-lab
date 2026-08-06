@@ -71,7 +71,7 @@
       overflow: hidden;
     }
 
-    /* Row: min / max */
+    /* Row: usuarios / más activo */
     .row-minmax {
       display: grid; grid-template-columns: 1fr 1fr;
       border-bottom: 1px solid #1e2d45;
@@ -177,17 +177,17 @@
   <!-- Metrics panel -->
   <section class="metrics-panel">
 
-    <!-- Min / Max -->
+    <!-- Usuarios únicos / Más activo -->
     <div class="row-minmax">
       <div class="minmax-box">
-        <div class="label-sm">Minimo</div>
-        <div class="minmax-val" id="minVal">—</div>
-        <div class="minmax-user" id="minUser"></div>
+        <div class="label-sm">Usuarios únicos</div>
+        <div class="minmax-val" id="usuariosCount">0</div>
+        <div class="minmax-user">participantes</div>
       </div>
       <div class="minmax-box">
-        <div class="label-sm">Maximo</div>
-        <div class="minmax-val" id="maxVal">—</div>
-        <div class="minmax-user" id="maxUser"></div>
+        <div class="label-sm">Más activo</div>
+        <div class="minmax-val" id="masActivoTotal">—</div>
+        <div class="minmax-user" id="masActivoUser"></div>
       </div>
     </div>
 
@@ -223,14 +223,14 @@
   <footer class="bottombar">
     <div class="lag-indicators" id="lagRow">
       <div class="lag-item">
-        <span class="lag-dot" id="dot-minimo"></span>
-        <span class="lag-name">minimo</span>
-        <span class="lag-num" id="lag-minimo">0</span>
+        <span class="lag-dot" id="dot-usuarios"></span>
+        <span class="lag-name">usuarios</span>
+        <span class="lag-num" id="lag-usuarios">0</span>
       </div>
       <div class="lag-item">
-        <span class="lag-dot" id="dot-maximo"></span>
-        <span class="lag-name">maximo</span>
-        <span class="lag-num" id="lag-maximo">0</span>
+        <span class="lag-dot" id="dot-mas_activo"></span>
+        <span class="lag-name">más activo</span>
+        <span class="lag-num" id="lag-mas_activo">0</span>
       </div>
       <div class="lag-item">
         <span class="lag-dot" id="dot-moda"></span>
@@ -284,7 +284,7 @@
   function update(d) {
     updateCounter(d.logLength);
     updateLog(d.ultimos || []);
-    updateMinMax(d.consumers);
+    updateUsuarios(d.consumers);
     updateModa(d.consumers.moda);
     updateVentana(d.consumers.ventana);
     updateLag(d.consumers);
@@ -318,12 +318,11 @@
     });
   }
 
-  // Min / Max
-  function updateMinMax(c) {
-    setText('minVal',  c.minimo.numero ?? '—');
-    setText('minUser', c.minimo.user   ?? '');
-    setText('maxVal',  c.maximo.numero ?? '—');
-    setText('maxUser', c.maximo.user   ?? '');
+  // Usuarios únicos / Más activo
+  function updateUsuarios(c) {
+    setText('usuariosCount',  c.usuarios.count ?? 0);
+    setText('masActivoTotal', c.mas_activo.total || '—');
+    setText('masActivoUser',  c.mas_activo.user  ?? '');
   }
 
   // Moda — detecta cambio de número #1 y hace flash
