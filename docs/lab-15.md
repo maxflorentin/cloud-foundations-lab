@@ -1,189 +1,303 @@
-# Lab 15 — Streaming: append-only log, consumidores y lag
+# Lab 15 — Event-driven: EventBridge, Kafka y cuándo usar qué
 
-**Clase:** 15 · **Tiempo estimado:** 45–60 min · **Entregable:** `NombreApellido.md`
+**Clase:** 15 · **Tiempo estimado:** 50–65 min · **Entregable:** `NombreApellido.md`
 
-> **Objetivo:** entender el modelo de log distribuido que subyace a Kafka y Kinesis
-> observando en vivo cómo múltiples consumidores independientes leen el mismo log
-> a distintas velocidades, con distintas semánticas de deduplicación.
+> **Objetivo:** producir y consumir eventos usando EventBridge y Kafka/Redpanda,
+> entender la diferencia entre cola (SQS) y log (Kafka/Kinesis), y saber
+> elegir el servicio correcto para cada patrón de integración.
 >
 > Al terminar tenés que poder responder con evidencia:
-> 1. ¿Por qué todos los eventos de un mismo usuario siempre caen en la misma partición?
-> 2. ¿Qué pasa cuando un consumidor se reinicia desde offset 0 (replay)?
-> 3. ¿Qué es el lag y cómo se traduce a `IteratorAgeMilliseconds` en Kinesis?
-> 4. ¿Qué diferencia hay entre que el servidor deduplique vs que lo haga el consumidor?
+> 1. ¿Qué pasa con un mensaje de SQS después de que lo lés? ¿Y con un evento de Kafka?
+> 2. ¿Cómo EventBridge filtra eventos antes de entregarlos?
+> 3. ¿Por qué dos consumer groups distintos pueden leer el mismo topic Kafka de forma independiente?
+> 4. ¿En qué caso elegirías Kinesis/Kafka sobre EventBridge? ¿Y sobre SQS?
 
 ---
 
-## Contexto del sistema
+## Prerrequisitos
 
-El servidor de clase expone un **log append-only** — el mismo primitivo que usa
-Kafka (topic/offset) o Kinesis (stream/sequence-number).
-
-```
-POST /events  →  append al log  →  fan-out a 5 consumidores independientes
-                                    ├── usuarios    (usuarios únicos)
-                                    ├── mas_activo  (quién mandó más)
-                                    ├── moda        (número más elegido — rompible)
-                                    ├── ventana     (tumbling window 10s)
-                                    └── lento       (simula 400ms por evento)
+```bash
+docker compose up -d localstack redpanda
 ```
 
-Cada consumidor tiene su propio **checkpoint** (offset hasta donde leyó).
-El lag es `logLength - checkpoint`.
+Verificar:
+
+```bash
+awslocal events list-event-buses       # debe listar "default"
+rpk cluster health                     # debe mostrar "Healthy: true"
+```
+
+> **Si `awslocal` no está disponible**, usá `aws --endpoint-url=http://localhost:4566 --region us-east-1`
+> en lugar de `awslocal` en todos los comandos del lab.
 
 ---
 
-## Paso 1 — Conectarte como productor
+## Parte A — EventBridge
 
-Abrí en el celular (o en una pestaña del navegador) la URL que te va a dar el
-profesor. Es la página del productor.
+EventBridge es un **event bus administrado**: los productores publican eventos
+con `put-events` y EventBridge los enruta a targets (SQS, Lambda, etc.) según
+reglas con filtros de patrón JSON.
 
-Completá tu nombre y elegí un número entre 1 y 100. Enviá un evento con **ENVIAR**.
+### Paso A1 — Bus de eventos y regla con filtro
 
-En el feedback vas a ver:
+```bash
+# Bus personalizado
+awslocal events create-event-bus --name lab-bus
 
+# Cola SQS destino (target)
+awslocal sqs create-queue --queue-name eventos-eb
+
+# Regla: solo eventos de source "tienda" con detail-type "Pedido"
+awslocal events put-rule \
+  --name regla-pedidos \
+  --event-bus-name lab-bus \
+  --event-pattern '{"source":["tienda"],"detail-type":["Pedido"]}' \
+  --state ENABLED
+
+# Conectar la regla a la cola SQS
+awslocal events put-targets \
+  --rule regla-pedidos \
+  --event-bus-name lab-bus \
+  --targets '[{"Id":"1","Arn":"arn:aws:sqs:us-east-1:000000000000:eventos-eb"}]'
 ```
-offset 5
-particion 2 · id …a3f8c2d1
+
+Verificar que la regla quedó activa:
+
+```bash
+awslocal events list-rules --event-bus-name lab-bus
+```
+
+> **Para el entregable:** ¿qué tiene que cumplir un evento para que la regla lo capture?
+> ¿Qué pasa con un evento que NO cumple el patrón?
+
+### Paso A2 — Publicar eventos y observar filtrado
+
+Publicar un evento que **sí** cumple el patrón:
+
+```bash
+awslocal events put-events \
+  --entries '[{
+    "Source": "tienda",
+    "DetailType": "Pedido",
+    "Detail": "{\"id\":\"P-001\",\"monto\":1500,\"usuario\":\"sofia\"}",
+    "EventBusName": "lab-bus"
+  }]'
+```
+
+Verificar que llegó a la cola:
+
+```bash
+awslocal sqs receive-message \
+  --queue-url http://localhost:4566/000000000000/eventos-eb \
+  --attribute-names All
+```
+
+Publicar un evento que **no** cumple el patrón (source distinto):
+
+```bash
+awslocal events put-events \
+  --entries '[{
+    "Source": "sistema-interno",
+    "DetailType": "Pedido",
+    "Detail": "{\"id\":\"X-001\"}",
+    "EventBusName": "lab-bus"
+  }]'
+```
+
+Revisá la cola de nuevo. ¿Llegó el segundo evento?
+
+> **Para el entregable:** pegá el JSON que devolvió `receive-message` para el primer evento.
+> Comparalo con el payload original — ¿qué campos agrega EventBridge?
+
+### Paso A3 — Cuándo usar EventBridge
+
+EventBridge es ideal para **integrar servicios** con filtrado declarativo.
+Lo que **no** es: un log replayable ni una cola de alta throughput.
+
+Completá en el entregable:
+
+| Caso | ¿EventBridge? | Alternativa si no |
+|---|---|---|
+| Notificar a 5 servicios cuando se crea un usuario | | |
+| Procesar 50.000 clicks/segundo con replay | | |
+| Reaccionar a eventos de otros servicios AWS (ej: S3 object created) | | |
+| Cola de trabajo con reintentos y DLQ | | |
+
+---
+
+## Parte B — Kafka / Redpanda
+
+Kafka es un **log distribuido**: los mensajes se persisten en el broker y
+múltiples consumidores pueden leerlos de forma independiente, con replay.
+Redpanda es 100% compatible con la API Kafka.
+
+### Paso B1 — Crear topic con particiones
+
+```bash
+# Topic con 3 particiones — equivalente a 3 shards en Kinesis
+rpk topic create cloud-events --partitions 3 --replicas 1
+
+rpk topic list
+rpk topic describe cloud-events
 ```
 
 Anotá en el entregable:
-- Tu offset
-- Tu partición
+- ¿Cuántas particiones tiene el topic?
+- ¿Qué relación tiene la cantidad de particiones con el paralelismo de consumo?
 
-Enviá un segundo evento con un número distinto. ¿Cambió la partición? ¿Por qué sí o no?
-
-> El servidor calcula `particion = hash(nombre) % 3`. El hash de tu nombre es
-> siempre el mismo → todos tus eventos van al mismo shard. En Kinesis esto se
-> llama *partition key*.
-
----
-
-## Paso 2 — Observar el log en el dashboard
-
-El profesor va a proyectar el dashboard. Mirá el panel izquierdo (el log) y
-buscá tus eventos por nombre. Debería aparecer con el mismo color de partición
-que te indicó el celular.
-
-Pregunta para el entregable: ¿los eventos de distintos usuarios están mezclados
-en el log? ¿Y dentro de tu partición — qué orden tienen?
-
----
-
-## Paso 3 — Duplicado e idempotencia
-
-Apretá **ENVIAR DUPLICADO** en tu celular (usa el mismo `event_id` dos veces).
-
-Observá en el dashboard el panel **Más elegido (moda)**:
-- ¿Subió el conteo del número que enviaste?
-- ¿Lo hizo una vez o dos?
-
-Ahora el profesor va a activar **Idempotencia** (`I` en el dashboard o badge amarillo).
-
-Apretá **ENVIAR DUPLICADO** de nuevo. ¿Qué pasó con el conteo esta vez?
-
-Para el entregable respondé:
-- ¿Quién decidió ignorar el duplicado: el log, el servidor de ingesta, o el consumidor?
-- ¿Cómo lo hizo técnicamente? (pista: `event_id`)
-- ¿En qué se parece esto a una tabla de idempotency keys en DynamoDB?
-
----
-
-## Paso 4 — Ráfaga y lag
-
-Apretá **RAFAGA x10** (manda 10 eventos del mismo número en rápida sucesión).
-
-Mirá en el dashboard la barra inferior (**lag indicators**):
-
-- `usuarios`, `mas_activo`, `moda`, `ventana` → deberían tener lag ≈ 0 (alcanzaron el final del log casi instantáneamente)
-- `lento` → va a tener lag > 0 (simula un consumidor que tarda 400ms por evento)
-
-Esperá hasta que el punto de `lento` vuelva a verde (lag = 0).
-
-Para el entregable respondé:
-- ¿El log esperó a que `lento` terminara antes de aceptar nuevos eventos? ¿Por qué no?
-- ¿Qué pasa con los datos mientras `lento` tiene lag? ¿Se pierden?
-- En Kinesis, ¿cómo se llama la métrica que mide este lag?
-
----
-
-## Paso 5 — Replay
-
-El profesor va a presionar **Replay** (`R`).
-
-Todos los consumidores van a resetear su checkpoint a 0 y releer el log
-completo desde el principio. Observá en el dashboard cómo se reconstruyen
-los números, la moda y los conteos.
-
-Para el entregable respondé:
-- ¿El resultado final fue idéntico al original?
-- ¿Qué propiedad del log hace posible el replay?
-- ¿Cómo se llama esta operación en Kinesis? ¿Y en Kafka?
-
----
-
-## Paso 6 — Consultar el log crudo (opcional)
-
-Podés ver el log crudo completo con:
+### Paso B2 — Producir con partition key
 
 ```bash
-curl "URL_DEL_SERVIDOR/log?from=0&limit=50"
+python3 scripts/produce_kafka.py
 ```
 
-Buscá tus propios eventos por nombre. Verificá que el campo `partition`
-coincide con lo que viste en el celular.
+El script usa el campo `actor` del evento como **partition key**.
+Todos los eventos del mismo actor van a la misma partición — garantiza orden por actor.
 
-También podés ver el estado actual de todos los consumidores:
+> Equivalente en Kinesis: `PartitionKey` en `put_record()`.
+> Equivalente en lo que viste en el live de clase: `hash(user) % 3`.
+
+Mirá la salida del script: ¿el offset sube de forma monotónica?
+
+### Paso B3 — Consumir y verificar offsets
 
 ```bash
-curl "URL_DEL_SERVIDOR/snapshot"
+python3 scripts/consume_kafka.py --from-beginning
+```
+
+Observá que cada mensaje muestra `offset=N`. El broker recuerda hasta dónde
+leyó este consumer group en un campo llamado **committed offset** (checkpoint).
+
+Interrumpí con `Ctrl+C` a mitad de la lectura. Volvé a correr sin `--from-beginning`:
+
+```bash
+python3 scripts/consume_kafka.py
+```
+
+¿Qué pasó? ¿Leyó los mensajes desde el principio o desde donde quedó?
+
+> En SQS el mensaje se elimina al ser leído (o al expirar la visibility window).
+> En Kafka el mensaje **sigue en el log** — el consumer solo avanza su offset.
+
+### Paso B4 — Dos consumer groups independientes
+
+Los consumer groups son la forma en que Kafka aísla el progreso de distintos consumidores.
+Cada grupo tiene su propio offset committado — no interfieren entre sí.
+
+En una terminal, corré el consumidor analytics:
+
+```bash
+KAFKA_GROUP_ID=analytics-group python3 scripts/consume_kafka.py --from-beginning
+```
+
+En otra terminal, corré un segundo consumidor con group distinto:
+
+```bash
+KAFKA_GROUP_ID=audit-group python3 scripts/consume_kafka.py --from-beginning
+```
+
+Ambos leen los mismos mensajes. En SQS con una cola, el primer consumidor
+que lee el mensaje se lo "lleva" — el segundo no lo vería.
+
+> **Para el entregable:** describí con tus palabras por qué esto es imposible en SQS
+> pero natural en Kafka/Kinesis.
+
+### Paso B5 — Replay desde offset 0
+
+Con `--from-beginning` el consumidor usa `auto.offset.reset=earliest`,
+lo que es equivalente a `TRIM_HORIZON` en Kinesis.
+
+```bash
+KAFKA_GROUP_ID=replay-test python3 scripts/consume_kafka.py --from-beginning
+```
+
+Contá cuántos mensajes leyó. Volvé a correr el mismo comando:
+¿leyó los mismos mensajes de nuevo? ¿Por qué?
+
+> En SQS no existe replay: un mensaje consumido se elimina de la cola.
+> En Kafka/Kinesis el log se retiene por un período configurable (default 7 días en Kinesis).
+
+---
+
+## Parte C — Tabla de decisión
+
+Completá en el entregable la siguiente tabla para cada escenario:
+
+| Escenario | Servicio elegido | Razón principal |
+|---|---|---|
+| Fan-out: un evento → 5 microservicios reaccionan | | |
+| Pipeline de ML: re-entrenar el modelo desde datos históricos | | |
+| Cola de trabajo: procesar pagos con reintentos y DLQ | | |
+| 100k eventos/s de clickstream con múltiples consumidores | | |
+| Reaccionar al evento `aws.s3` de un bucket | | |
+| Microservicios en la misma cuenta que se notifican entre sí | | |
+
+---
+
+## Paso C1 — Limpieza
+
+```bash
+# EventBridge
+awslocal events remove-targets --rule regla-pedidos --event-bus-name lab-bus --ids 1
+awslocal events delete-rule --name regla-pedidos --event-bus-name lab-bus
+awslocal events delete-event-bus --name lab-bus
+awslocal sqs delete-queue --queue-url http://localhost:4566/000000000000/eventos-eb
+
+# Kafka
+rpk topic delete cloud-events
 ```
 
 ---
 
 ## Entregable — `NombreApellido.md`
 
-1. Tu primer evento: offset y partición recibidos.
-2. Respuesta a: ¿por qué el mismo usuario siempre va a la misma partición?
-3. Observación del duplicado — comportamiento antes y después de activar idempotencia.
-4. Observación del lag en `lento` — ¿cuánto tiempo tardó en recuperarse aproximadamente?
-5. Respuesta a: ¿qué pasa con los datos de un consumidor con lag si el servidor se reinicia?
-6. Observación del replay — ¿el estado final fue idéntico?
-7. Tres líneas de cierre:
-   - Una diferencia entre este log en memoria y Kinesis/Kafka real.
-   - ¿En qué caso necesitarías idempotencia en un pipeline de producción?
-   - ¿Por qué el lag del consumidor lento no afectó a los demás?
+1. Output de `list-rules` con la regla creada.
+2. JSON de `receive-message` del primer evento y comparación con el payload original.
+3. Tabla A3 completa (cuándo usar EventBridge).
+4. Output de `describe cloud-events` con las 3 particiones.
+5. Observación de `consume_kafka.py` interrumpido y reiniciado — ¿desde dónde retomó?
+6. Explicación (3–5 líneas) de por qué dos consumer groups son independientes en Kafka pero no en SQS.
+7. Tabla de decisión C completa con justificaciones.
 
 ### Criterios de corrección
 
 | # | Criterio | Peso |
 |---|---|---|
-| 1 | Observación propia del log con offset y partición propios | 20% |
-| 2 | Explicación correcta de particionado por partition key | 20% |
-| 3 | Diferencia observada con/sin idempotencia + explicación de cómo funciona | 25% |
-| 4 | Explicación de lag y desacople productor/consumidor | 20% |
-| 5 | Replay — propiedad del log que lo hace posible + equivalente en prod | 15% |
+| 1 | EventBridge: regla activa, evento filtrado correctamente y observación de evento que no matchea | 25% |
+| 2 | Kafka: topic creado, offsets visibles al consumir, checkpoint correcto al reiniciar | 25% |
+| 3 | Diferencia Kafka vs SQS: consumer groups y log retention explicados con evidencia | 25% |
+| 4 | Tabla de decisión razonada (no alcanza con nombrar el servicio, hay que justificar) | 25% |
 
 ---
 
-## Equivalencias con producción
+## Kinesis: la versión managed de Kafka en AWS
 
-| Pieza del lab | Equivalente en producción |
+En este lab usamos Kafka/Redpanda localmente porque es más fácil de levantar sin cuenta AWS.
+En producción, Kinesis Data Streams ofrece la misma semántica con una API distinta:
+
+| Concepto Kafka | Equivalente Kinesis |
 |---|---|
-| Array + `events.ndjson` | Kinesis Data Stream / tópico Kafka |
-| `offset` | sequence number / offset |
-| `hash(user) % 3` | partition key → shard |
-| `checkpoint` de cada consumidor | checkpoint en DynamoDB (KCL) / consumer group offset |
-| Replay desde offset 0 | `TRIM_HORIZON` en Kinesis / `auto.offset.reset=earliest` en Kafka |
-| `Set` de `event_id` en moda | tabla de deduplicación / idempotency key |
-| lag del consumidor lento | `IteratorAgeMilliseconds` / consumer lag |
-| tick de 250ms | Lambda event source mapping con batch size |
+| Topic | Stream |
+| Partición | Shard |
+| `PartitionKey` | `PartitionKey` en `put_record` |
+| Consumer group offset | Checkpoint en DynamoDB (KCL) |
+| `auto.offset.reset=earliest` | `TRIM_HORIZON` |
+| `--from-beginning` | Iterator type `TRIM_HORIZON` |
+| Retención configurable | 24h default, hasta 365 días |
+
+Precio: Kinesis cobra por **shard-hour** ($0.015/shard/hora) más por **payload** ($0.014 por millón de PUT).
+Un stream de 1 shard activo todo el mes = ~$11/mes antes de datos.
+
+Para volúmenes medianos-altos con equipo con expertise Kafka: Amazon MSK.
+Para integración entre servicios AWS con lógica de enrutamiento: EventBridge.
+Para cola simple con reintentos y DLQ: SQS.
 
 ---
 
 ## Referencias
 
-- Kinesis Data Streams: https://docs.aws.amazon.com/streams/latest/dev/introduction.html
-- Kinesis consumer lag (`IteratorAgeMilliseconds`): https://docs.aws.amazon.com/streams/latest/dev/monitoring-with-cloudwatch.html
-- Kafka consumer group offsets: https://kafka.apache.org/documentation/#intro_consumers
-- Idempotent consumers: https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/
+- EventBridge patterns: https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-event-patterns.html
+- Kinesis vs SQS vs EventBridge: https://aws.amazon.com/blogs/compute/choosing-between-messaging-services-for-serverless-workloads/
+- Kafka consumer groups: https://kafka.apache.org/documentation/#intro_consumers
+- Redpanda docs: https://docs.redpanda.com/current/get-started/quick-start/
+- Kinesis pricing: https://aws.amazon.com/kinesis/data-streams/pricing/
