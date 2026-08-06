@@ -1,0 +1,145 @@
+/* ITBA Design System — Cloud Computing ────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Chivo:wght@400;700;900&display=swap');
+
+:root {
+  --accent:      #2458FF;
+  --accent-dim:  #1a3eb8;
+  --magenta:     #E5007E;
+  --yellow:      #FFCB25;
+  --green:       #00C07F;
+  --bg:          #FFFFFF;
+  --bg-subtle:   #F4F6FF;
+  --bg-dark:     #0D1B2A;
+  --border:      #DDE2F0;
+  --text:        #0D1B2A;
+  --text-muted:  #5A6478;
+  --text-inv:    #FFFFFF;
+  --mono:        'JetBrains Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+  --sans:        'Chivo', system-ui, -apple-system, sans-serif;
+  --radius:      8px;
+  --radius-lg:   12px;
+  --gap:         16px;
+  --gap-sm:      8px;
+  --gap-lg:      24px;
+  --shadow:      0 2px 8px rgba(36,88,255,.10);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Utilidades ─────────────────────────────────────────────────────────────── */
+.mono       { font-family: var(--mono); }
+.muted      { color: var(--text-muted); }
+.accent     { color: var(--accent); }
+.sr-only    { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+
+/* ── Botones ─────────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-sm);
+  min-height: 44px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 120ms, transform 80ms;
+  text-decoration: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: scale(.97); }
+.btn-primary   { background: var(--accent); color: var(--text-inv); }
+.btn-primary:hover { background: var(--accent-dim); }
+.btn-secondary { background: var(--bg-subtle); color: var(--accent); border: 2px solid var(--accent); }
+.btn-secondary:hover { background: #e6ecff; }
+.btn-danger    { background: var(--magenta); color: var(--text-inv); }
+.btn-sm        { min-height: 36px; padding: 6px 14px; font-size: 14px; }
+.btn-full      { width: 100%; }
+
+/* ── Inputs ──────────────────────────────────────────────────────────────────── */
+.input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--sans);
+  font-size: 16px;
+  color: var(--text);
+  background: var(--bg);
+  transition: border-color 120ms;
+  outline: none;
+}
+.input:focus  { border-color: var(--accent); }
+.input.large  { font-size: 32px; text-align: center; font-weight: 900; min-height: 72px; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--gap);
+  box-shadow: var(--shadow);
+}
+
+/* ── Badges ──────────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.badge-off { background: var(--bg-subtle); color: var(--text-muted); }
+.badge-on  { background: var(--yellow); color: var(--text); }
+
+/* ── Lag dot ─────────────────────────────────────────────────────────────────── */
+.lag-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  transition: background 400ms;
+}
+.lag-dot.warn    { background: var(--yellow); }
+.lag-dot.critical { background: var(--magenta); }
+
+/* ── Partition chip ──────────────────────────────────────────────────────────── */
+.p0 { background: #e6ecff; color: var(--accent); }
+.p1 { background: #fff0f8; color: var(--magenta); }
+.p2 { background: #fffbe6; color: #8a6d00; }
+.part {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* ── Fade-in-up para nuevos eventos ─────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.event-new { animation: fadeInUp 240ms ease-out; }
+
+/* ── Flash para cambios de moda ──────────────────────────────────────────────── */
+@keyframes flashAccent {
+  0%   { background: var(--yellow); }
+  100% { background: transparent; }
+}
+.flash { animation: flashAccent 800ms ease-out; }

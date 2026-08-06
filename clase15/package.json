@@ -1,0 +1,14 @@
+{
+  "name": "clase15-live-events",
+  "version": "1.0.0",
+  "description": "Analítica de eventos en tiempo real — Lab clase 15 ITBA",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "start:resume": "node server/index.js --resume",
+    "start:simulate": "node server/index.js --simulate"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

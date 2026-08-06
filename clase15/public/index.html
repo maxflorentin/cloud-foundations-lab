@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Enviar evento — Cloud Computing ITBA</title>
+  <link rel="stylesheet" href="/itba.css">
+  <style>
+    body { max-width: 480px; margin: 0 auto; padding: var(--gap); min-height: 100dvh; display: flex; flex-direction: column; }
+
+    .topbar {
+      display: flex; align-items: center; gap: var(--gap-sm);
+      padding: var(--gap-sm) 0; margin-bottom: var(--gap);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+    .topbar .title   { font-size: 15px; font-weight: 900; color: var(--accent); }
+
+    .form-group { margin-bottom: var(--gap); }
+    label { display: block; font-size: 13px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+
+    .numero-wrap { position: relative; }
+    .numero-wrap input[type=number] { -moz-appearance: textfield; }
+    .numero-wrap input::-webkit-inner-spin-button,
+    .numero-wrap input::-webkit-outer-spin-button { -webkit-appearance: none; }
+    .numero-stepper {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      display: flex; flex-direction: column; gap: 2px; right: 10px;
+    }
+    .numero-stepper button {
+      width: 32px; height: 28px; border: 1px solid var(--border);
+      border-radius: 4px; background: var(--bg-subtle);
+      font-size: 18px; font-weight: 700; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 100ms;
+    }
+    .numero-stepper button:hover { background: var(--border); }
+
+    .actions { display: flex; flex-direction: column; gap: var(--gap-sm); margin-top: var(--gap); }
+    .actions .row { display: flex; gap: var(--gap-sm); }
+    .actions .row .btn { flex: 1; font-size: 14px; }
+
+    .feedback {
+      margin-top: var(--gap);
+      padding: var(--gap);
+      border-radius: var(--radius);
+      background: var(--bg-subtle);
+      border-left: 4px solid var(--accent);
+      font-size: 14px;
+      display: none;
+    }
+    .feedback.visible { display: block; }
+    .feedback.error   { border-left-color: var(--magenta); }
+    .feedback .offset { font-family: var(--mono); font-size: 24px; font-weight: 900; color: var(--accent); display: block; }
+    .feedback .label  { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    footer { margin-top: auto; padding-top: var(--gap-lg); text-align: center; font-size: 12px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <div class="eyebrow">ITBA / Cloud Architecture</div>
+      <div class="title">Analítica en vivo</div>
+    </div>
+  </div>
+
+  <form id="eventForm" autocomplete="off" novalidate>
+    <div class="form-group">
+      <label for="user">Tu nombre</label>
+      <input class="input" type="text" id="user" name="user"
+             placeholder="ej: sofia" maxlength="20" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="form-group">
+      <label for="numero">Tu número (1–100)</label>
+      <div class="numero-wrap">
+        <input class="input large" type="number" id="numero" name="numero"
+               min="1" max="100" placeholder="7">
+        <div class="numero-stepper">
+          <button type="button" id="numUp" aria-label="Subir">+</button>
+          <button type="button" id="numDown" aria-label="Bajar">-</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="btn btn-primary btn-full" id="btnEnviar">
+        ENVIAR
+      </button>
+      <div class="row">
+        <button type="button" class="btn btn-secondary" id="btnDuplicado">
+          ENVIAR DUPLICADO
+        </button>
+        <button type="button" class="btn btn-secondary" id="btnRafaga">
+          RAFAGA x10
+        </button>
+      </div>
+    </div>
+  </form>
+
+  <div class="feedback" id="feedback">
+    <span class="offset" id="fbOffset"></span>
+    <span class="label" id="fbLabel"></span>
+  </div>
+
+  <footer>Cloud Computing · ITBA Escuela de Innovación</footer>
+
+  <script>
+    // ── Estado ───────────────────────────────────────────────────────────────
+    let lastEventId = null;
+
+    const userInput  = document.getElementById('user');
+    const numInput   = document.getElementById('numero');
+    const feedback   = document.getElementById('feedback');
+    const fbOffset   = document.getElementById('fbOffset');
+    const fbLabel    = document.getElementById('fbLabel');
+
+    // Persistir nombre en localStorage
+    const savedUser = localStorage.getItem('itba_user');
+    if (savedUser) userInput.value = savedUser;
+    userInput.addEventListener('change', () => {
+      localStorage.setItem('itba_user', userInput.value.trim());
+    });
+
+    // ── Stepper ──────────────────────────────────────────────────────────────
+    document.getElementById('numUp').addEventListener('click', () => {
+      const v = parseInt(numInput.value) || 0;
+      if (v < 100) numInput.value = v + 1;
+    });
+    document.getElementById('numDown').addEventListener('click', () => {
+      const v = parseInt(numInput.value) || 2;
+      if (v > 1) numInput.value = v - 1;
+    });
+
+    // ── Enviar ───────────────────────────────────────────────────────────────
+    async function sendEvent(eventId, numero, user) {
+      const res = await fetch('/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event_id: eventId, user, numero }),
+      });
+      return res;
+    }
+
+    function showFeedback(msg, label, isError = false) {
+      feedback.className = 'feedback visible' + (isError ? ' error' : '');
+      fbOffset.textContent = msg;
+      fbLabel.textContent  = label;
+    }
+
+    async function doSend(forceEventId = null) {
+      const user   = userInput.value.trim();
+      const numero = parseInt(numInput.value);
+
+      if (!user)              return showFeedback('Falta tu nombre', '', true);
+      if (!numero || numero < 1 || numero > 100)
+        return showFeedback('Numero invalido', 'Debe ser entre 1 y 100', true);
+
+      const eventId = forceEventId || crypto.randomUUID();
+      lastEventId = eventId;
+      localStorage.setItem('itba_user', user);
+
+      try {
+        const res  = await sendEvent(eventId, numero, user);
+        const data = await res.json();
+        if (!res.ok) {
+          showFeedback('Error', data.errors?.join(' · ') || data.error, true);
+          return null;
+        }
+        showFeedback(`offset ${data.offset}`, `particion ${data.partition} · id …${eventId.slice(-8)}`);
+        return eventId;
+      } catch (e) {
+        showFeedback('Sin conexion', e.message, true);
+        return null;
+      }
+    }
+
+    // Enviar normal
+    document.getElementById('eventForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await doSend();
+    });
+
+    // Enviar duplicado — mismo event_id dos veces: el servidor lo acepta, moda lo cuenta doble
+    document.getElementById('btnDuplicado').addEventListener('click', async () => {
+      if (!lastEventId) {
+        // primera vez: enviar, guardar id, y volver a enviar
+        const id = await doSend();
+        if (id) {
+          await new Promise(r => setTimeout(r, 200));
+          await doSend(id);
+          showFeedback('Duplicado enviado', `mismo event_id …${id.slice(-8)} — moda lo va a contar doble`);
+        }
+      } else {
+        await doSend(lastEventId);
+        showFeedback('Duplicado enviado', `mismo event_id …${lastEventId.slice(-8)}`);
+      }
+    });
+
+    // Rafaga x10 — 10 eventos con el mismo numero, event_ids distintos
+    document.getElementById('btnRafaga').addEventListener('click', async () => {
+      const user   = userInput.value.trim();
+      const numero = parseInt(numInput.value);
+      if (!user || !numero) return showFeedback('Falta nombre o numero', '', true);
+
+      showFeedback('Enviando rafaga...', '10 eventos');
+      let sent = 0;
+      for (let i = 0; i < 10; i++) {
+        const id  = crypto.randomUUID();
+        const res = await sendEvent(id, numero, user);
+        if (res.ok) { lastEventId = id; sent++; }
+        await new Promise(r => setTimeout(r, 60));
+      }
+      showFeedback(`Rafaga: ${sent}/10 enviados`, `numero ${numero}`);
+    });
+  </script>
+</body>
+</html>

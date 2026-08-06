@@ -1,9 +1,8 @@
 {
-  "name": "clase15-live-events",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
   "forwardPorts": [3000],
   "portsAttributes": {
     "3000": { "label": "live-events", "visibility": "public" }
   },
-  "postCreateCommand": "cd clase15 && npm install"
+  "postCreateCommand": "npm install"
 }
