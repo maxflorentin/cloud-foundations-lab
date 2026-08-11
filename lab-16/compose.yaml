@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
       POSTGRES_DB: billetera
-    ports: ["5432:5432"]
+    ports: ["${PORT_PG:-5432}:5432"]
     volumes:
       - ./seed/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -24,7 +24,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    ports: ["9000:9000", "9001:9001"]
+    ports: ["${PORT_MINIO:-9000}:9000", "${PORT_MINIO_CONSOLE:-9001}:9001"]
     volumes:
       - minio-data:/data
     healthcheck:
@@ -32,79 +32,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # ---------- backend del catálogo ----------
-  metastore-db:
-    image: postgres:16
-    container_name: lake-metastore-db
-    environment:
-      POSTGRES_USER: hive
-      POSTGRES_PASSWORD: hive
-      POSTGRES_DB: metastore
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  # ---------- catálogo (rol de Glue Data Catalog) ----------
-  # apache/hive:4.0.0 no incluye el driver JDBC de Postgres en su imagen base;
-  # el entrypoint lo descarga en el primer arranque (~3MB, una vez).
-  metastore:
-    image: apache/hive:4.0.0
-    container_name: lake-metastore
-    depends_on:
-      metastore-db:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    environment:
-      SERVICE_NAME: metastore
-      DB_DRIVER: postgres
-      SERVICE_OPTS: >-
-        -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
-        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://metastore-db:5432/metastore
-        -Djavax.jdo.option.ConnectionUserName=hive
-        -Djavax.jdo.option.ConnectionPassword=hive
-        -Dhive.metastore.warehouse.dir=s3a://raw/
-        -Dfs.s3a.endpoint=http://minio:9000
-        -Dfs.s3a.access.key=minioadmin
-        -Dfs.s3a.secret.key=minioadmin
-        -Dfs.s3a.path.style.access=true
-        -Dfs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
-    entrypoint: >
-      bash -c "
-        JAR=/opt/hive/lib/postgresql.jar
-        if [ ! -f \"$$JAR\" ]; then
-          echo '[metastore] Descargando driver JDBC Postgres...'
-          curl -fsSL https://jdbc.postgresql.org/download/postgresql-42.7.3.jar -o \"$$JAR\"
-        fi
-        exec /entrypoint.sh
-      "
-    ports: ["9083:9083"]
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 9083 || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
-
-  # ---------- motor de consulta (rol de Athena) ----------
-  trino:
-    image: trinodb/trino:440
-    container_name: lake-trino
-    ports: ["8080:8080"]
-    volumes:
-      - ./trino/catalog:/etc/trino/catalog:ro
-    depends_on:
-      metastore:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
 
 volumes:
   minio-data:
