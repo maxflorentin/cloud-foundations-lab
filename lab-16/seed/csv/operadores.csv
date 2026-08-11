@@ -1,0 +1,13 @@
+operador_id,nombre,tipo,pais,comision_pct
+OP001,Movistar,telco,AR,2.5
+OP002,Claro,telco,ar,2.8
+OP003,Personal,telco,AR,
+OP004,Mercado Pago,fintech,AR,1.2
+OP005,Ualá,fintech,AR,1.5
+OP006,Nubank,fintech,MX,1.8
+OP007,OXXO Pay,fintech,mx,2.1
+OP008,Telcel,telco,MX,3.0
+OP009,Claro Colombia,telco,CO,2.7
+OP010,Tigo,telco,co,2.3
+OP001,Movistar (duplicado),telco,AR,2.5
+OP011,"Fila rota, coma extra",telco,AR,1.9,basura
