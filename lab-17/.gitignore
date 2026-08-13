@@ -1,0 +1,11 @@
+# Providers y caché de Terraform/OpenTofu
+.terraform/
+.terraform.lock.hcl
+
+# State files (contienen datos sensibles)
+.tfstate/
+*.tfstate
+*.tfstate.backup
+
+# Variables con secretos (si se usan en CI)
+*.auto.tfvars
